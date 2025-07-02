@@ -112,3 +112,9 @@ venv.bak/
 # User Definition
 .DS_Store
 output/
+
+wandb/
+wandb/*
+
+config.json
+training_log.csv

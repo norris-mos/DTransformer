@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 import os
 import argparse
+import json
 from tqdm import tqdm
 
 
@@ -23,10 +24,11 @@ class EediToDTransformer:
     - Line 3: Comma-separated responses (0=incorrect, 1=correct)
     """
     
-    def __init__(self, train_split: float = 0.8, random_seed: int = 42, min_sequence_length: int = 5):
+    def __init__(self, train_split: float = 0.9, random_seed: int = 42, min_sequence_length: int = 5, filtered_users_file: str = None):
         self.train_split = train_split
         self.random_seed = random_seed
         self.min_sequence_length = min_sequence_length
+        self.filtered_users_file = filtered_users_file
         
         # Data storage
         self.answers = None
@@ -34,13 +36,29 @@ class EediToDTransformer:
         self.merged_data = None
         self.train_users = None
         self.test_users = None
+        self.filtered_users = set()  # Track users to exclude
         
         # Mappings
         self.question_mapping = None
         self.num_questions = None
         
+    def load_filtered_users(self) -> None:
+        """Load the list of filtered users to exclude from processing."""
+        if self.filtered_users_file and os.path.exists(self.filtered_users_file):
+            print(f"Loading filtered users from {self.filtered_users_file}")
+            with open(self.filtered_users_file, 'r') as f:
+                filtered_data = json.load(f)
+                # Convert to set of integers for faster lookup
+                self.filtered_users = set(int(user) for user in filtered_data.get('filtered_users', []))
+            print(f"Loaded {len(self.filtered_users)} filtered users")
+        else:
+            print("No filtered users file provided or file doesn't exist")
+    
     def load_data(self, data_path: str) -> None:
         """Load EEDI dataset from CSV files."""
+        # Load filtered users first
+        self.load_filtered_users()
+        
         print("Loading EEDI dataset...")
         
         # Load CSV files
@@ -94,7 +112,7 @@ class EediToDTransformer:
         print(f"  Test users: {len(self.test_users)}")
         
     def _split_users(self) -> None:
-        """Split users into train and test sets."""
+        """Split users into train and test sets, then filter out excluded users."""
         unique_users = self.merged_data['UserId'].unique()
         
         # Set random seed for reproducible splits
@@ -102,10 +120,24 @@ class EediToDTransformer:
         shuffled_users = np.random.permutation(unique_users)
         
         split_idx = int(len(shuffled_users) * self.train_split)
-        self.train_users = shuffled_users[:split_idx]
-        self.test_users = shuffled_users[split_idx:]
+        train_users = shuffled_users[:split_idx]
+        test_users = shuffled_users[split_idx:]
         
-        print(f"Split {len(unique_users)} users into {len(self.train_users)} train, {len(self.test_users)} test")
+        # Filter out excluded users AFTER splitting to maintain consistency with eedi2text.py
+        if self.filtered_users:
+            initial_train = len(train_users)
+            initial_test = len(test_users)
+            
+            self.train_users = [user for user in train_users if user not in self.filtered_users]
+            self.test_users = [user for user in test_users if user not in self.filtered_users]
+            
+            print(f"Filtered out {initial_train - len(self.train_users)} train users")
+            print(f"Filtered out {initial_test - len(self.test_users)} test users")
+        else:
+            self.train_users = train_users
+            self.test_users = test_users
+        
+        print(f"Final split: {len(self.train_users)} train, {len(self.test_users)} test users")
         
     def _process_user_sequence(self, user_data: pd.DataFrame) -> tuple:
         """
@@ -186,7 +218,9 @@ class EediToDTransformer:
             f.write("=" * 40 + "\n\n")
             f.write(f"Random seed: {self.random_seed}\n")
             f.write(f"Train split: {self.train_split}\n")
-            f.write(f"Min sequence length: {self.min_sequence_length}\n\n")
+            f.write(f"Min sequence length: {self.min_sequence_length}\n")
+            f.write(f"Filtered users file: {self.filtered_users_file}\n")
+            f.write(f"Number of filtered users: {len(self.filtered_users)}\n\n")
             f.write(f"Total unique questions: {self.num_questions}\n")
             f.write(f"Train users: {len(self.train_users)}\n")
             f.write(f"Test users: {len(self.test_users)}\n\n")
@@ -207,12 +241,14 @@ def main():
                        help="Path to EEDI data directory containing CSV files")
     parser.add_argument("--output", type=str, required=True,
                        help="Path to output directory for train.txt and test.txt")
-    parser.add_argument("--train_split", type=float, default=0.8,
-                       help="Fraction of users for training (default: 0.8)")
+    parser.add_argument("--train_split", type=float, default=0.9,  # Changed from 0.8 to match eedi2text
+                       help="Fraction of users for training (default: 0.9)")
     parser.add_argument("--min_length", type=int, default=5,
                        help="Minimum sequence length to include (default: 5)")
     parser.add_argument("--seed", type=int, default=42,
                        help="Random seed for reproducible splits (default: 42)")
+    parser.add_argument("--filtered_users", type=str, default=None,
+                       help="Path to JSON file containing filtered users to exclude")
     
     args = parser.parse_args()
     
@@ -223,7 +259,8 @@ def main():
     converter = EediToDTransformer(
         train_split=args.train_split,
         random_seed=args.seed,
-        min_sequence_length=args.min_length
+        min_sequence_length=args.min_length,
+        filtered_users_file=args.filtered_users
     )
     
     # Load and process data
