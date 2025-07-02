@@ -25,3 +25,10 @@ test = "algebra05/test.txt"
 n_questions = 138
 n_pid = 1084
 inputs = ["pid", "q", "s"]
+
+[eedi]
+train = "eedi/train.txt"
+test = "eedi/test.txt"
+n_questions = 2578
+n_pid = 0
+inputs = ["q", "s"]

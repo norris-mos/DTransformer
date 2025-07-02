@@ -1,0 +1,33 @@
+EEDI to DTransformer Conversion Metadata
+========================================
+
+Random seed: 42
+Train split: 0.8
+Min sequence length: 5
+
+Total unique questions: 2578
+Train users: 31898
+Test users: 7975
+
+Question ID mapping (original -> mapped):
+  31769 -> 1
+  31771 -> 2
+  31775 -> 3
+  31777 -> 4
+  31781 -> 5
+  32827 -> 6
+  32829 -> 7
+  32831 -> 8
+  32833 -> 9
+  32835 -> 10
+  32837 -> 11
+  32839 -> 12
+  33467 -> 13
+  33471 -> 14
+  33473 -> 15
+  33475 -> 16
+  33477 -> 17
+  33933 -> 18
+  33935 -> 19
+  33937 -> 20
+  ... and 2558 more
