@@ -2,12 +2,14 @@ EEDI to DTransformer Conversion Metadata
 ========================================
 
 Random seed: 42
-Train split: 0.8
+Train split: 0.9
 Min sequence length: 5
+Filtered users file: /mnt/ceph_rbd/hfdatasets/filtered_users/filtered_users_maxlen12000.json
+Number of filtered users: 5490
 
 Total unique questions: 2578
-Train users: 31898
-Test users: 7975
+Train users: 30903
+Test users: 3480
 
 Question ID mapping (original -> mapped):
   31769 -> 1
