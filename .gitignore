@@ -118,3 +118,5 @@ wandb/*
 
 config.json
 training_log.csv
+
+*.txt
