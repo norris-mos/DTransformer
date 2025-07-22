@@ -1,6 +1,10 @@
 import os
+import sys
 import json
 from argparse import ArgumentParser
+
+# Add the parent directory to Python path to allow imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
 import tomlkit
@@ -32,14 +36,23 @@ parser.add_argument(
 )
 
 # model setup
-# TODO: model size, dropout rate, etc.
 parser.add_argument("-m", "--model", help="choose model")
 parser.add_argument("--d_model", help="model hidden size", type=int, default=128)
-parser.add_argument("--n_layers", help="number of layers", type=int, default=1)
+parser.add_argument("--n_layers", help="number of layers", type=int, default=3)
 parser.add_argument("--n_heads", help="number of heads", type=int, default=8)
 parser.add_argument(
     "--n_know", help="dimension of knowledge parameter", type=int, default=32
 )
+parser.add_argument("--dropout", help="dropout rate", type=float, default=0.2)
+parser.add_argument("--proj", help="projection layer before CL", action="store_true")
+parser.add_argument(
+    "--hard_neg", help="use hard negative samples in CL", action="store_true"
+)
+parser.add_argument(
+    "--lambda", help="CL loss weight", type=float, default=0.1, dest="lambda_cl"
+)
+parser.add_argument("--window", help="prediction window", type=int, default=1)
+parser.add_argument("--max_seq_len", help="maximum sequence length to truncate", type=int, default=None)
 
 # test setup
 parser.add_argument("-f", "--from_file", help="test existing model file", required=True)
@@ -51,6 +64,12 @@ def main(args):
     # prepare datasets
     dataset = datasets[args.dataset]
     seq_len = dataset["seq_len"] if "seq_len" in dataset else None
+    
+    # Override seq_len if max_seq_len is specified
+    if args.max_seq_len is not None:
+        seq_len = args.max_seq_len
+        print(f"Limiting sequences to max length: {seq_len}")
+    
     test_data = KTData(
         os.path.join(DATA_DIR, dataset["test"]),
         dataset["inputs"],
@@ -75,6 +94,7 @@ def main(args):
             dataset["n_pid"],
             d_model=args.d_model,
             n_heads=args.n_heads,
+            dropout=args.dropout,
         )
     else:
         from DTransformer.model import DTransformer
@@ -83,9 +103,14 @@ def main(args):
             dataset["n_questions"],
             dataset["n_pid"],
             d_model=args.d_model,
+            n_layers=args.n_layers,
             n_heads=args.n_heads,
             n_know=args.n_know,
-            n_layers=args.n_layers,
+            lambda_cl=args.lambda_cl,
+            dropout=args.dropout,
+            proj=args.proj,
+            hard_neg=args.hard_neg,
+            window=args.window,
         )
 
     model.load_state_dict(torch.load(args.from_file, map_location=lambda s, _: s))

@@ -21,6 +21,7 @@ except ImportError:
 
 from DTransformer.data import KTData
 from DTransformer.eval import Evaluator
+from DTransformer.eval_options import OptionsEvaluator
 
 DATA_DIR = "data"
 
@@ -244,7 +245,7 @@ def main(args):
         # Create training log file
         log_path = os.path.join(args.output_dir, "training_log.csv")
         with open(log_path, "w") as f:
-            f.write("epoch,train_loss,val_auc,val_acc,val_precision,val_recall,val_f1,val_mae,val_rmse\n")
+            f.write("epoch,train_loss,val_auc,val_acc,val_precision,val_recall,val_f1\n")
     else:
         log_path = None
 
@@ -270,14 +271,32 @@ def main(args):
         from baselines.DKT import DKT
 
         model = DKT(dataset["n_questions"], args.d_model)
+    elif args.model == "DKT_Options":
+        from baselines.DKT_Options import DKT_Options
+
+        model = DKT_Options(dataset["n_questions"], args.d_model)
     elif args.model == "DKVMN":
         from baselines.DKVMN import DKVMN
 
         model = DKVMN(dataset["n_questions"], args.batch_size)
+    elif args.model == "DKVMN_Options":
+        from baselines.DKVMN_Options import DKVMN_Options
+
+        model = DKVMN_Options(dataset["n_questions"], args.batch_size)
     elif args.model == "AKT":
         from baselines.AKT import AKT
 
         model = AKT(
+            dataset["n_questions"],
+            dataset["n_pid"],
+            d_model=args.d_model,
+            n_heads=args.n_heads,
+            dropout=args.dropout,
+        )
+    elif args.model == "AKT_Options":
+        from baselines.AKT_Options import AKT_Options
+
+        model = AKT_Options(
             dataset["n_questions"],
             dataset["n_pid"],
             d_model=args.d_model,
@@ -376,7 +395,11 @@ def main(args):
 
         # validation
         model.eval()
-        evaluator = Evaluator()
+        # Use options evaluator for options models, binary evaluator for others
+        if args.model.endswith("_Options"):
+            evaluator = OptionsEvaluator()
+        else:
+            evaluator = Evaluator()
 
         with torch.no_grad():
             it = tqdm(iter(valid_data))
@@ -394,7 +417,13 @@ def main(args):
                     if pid is not None:
                         pid = pid.to(args.device)
                     y, *_ = model.predict(q, s, pid)
-                    evaluator.evaluate(s, torch.sigmoid(y))
+                    
+                    if args.model.endswith("_Options"):
+                        # For options models, y contains option predictions
+                        evaluator.evaluate(s, y)
+                    else:
+                        # For binary models, apply sigmoid
+                        evaluator.evaluate(s, torch.sigmoid(y))
 
         r = evaluator.report()
         print(r)
@@ -406,8 +435,6 @@ def main(args):
                 "train/loss": avg_train_loss,
                 "val/auc": r["auc"],
                 "val/acc": r["acc"],
-                "val/mae": r["mae"],
-                "val/rmse": r["rmse"]
             }
             
             # Only add precision, recall, f1 if they exist in the results
@@ -434,7 +461,7 @@ def main(args):
                 recall = r.get("recall", 0.0)
                 f1 = r.get("f1", 0.0)
                 f.write(f"{epoch},{avg_train_loss:.6f},{r['auc']:.6f},{r['acc']:.6f},"
-                       f"{precision:.6f},{recall:.6f},{f1:.6f},{r['mae']:.6f},{r['rmse']:.6f}\n")
+                       f"{precision:.6f},{recall:.6f},{f1:.6f}\n")
 
         if r["auc"] > best["auc"]:
             best = r
@@ -445,8 +472,6 @@ def main(args):
                 wandb.run.summary["best_epoch"] = best_epoch
                 wandb.run.summary["best_auc"] = best["auc"]
                 wandb.run.summary["best_acc"] = best["acc"]
-                wandb.run.summary["best_mae"] = best["mae"]
-                wandb.run.summary["best_rmse"] = best["rmse"]
                 if "precision" in best:
                     wandb.run.summary["best_precision"] = best["precision"]
                 if "recall" in best:

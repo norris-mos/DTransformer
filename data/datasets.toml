@@ -32,3 +32,17 @@ test = "eedi/test.txt"
 n_questions = 2578
 n_pid = 0
 inputs = ["q", "s"]
+
+[eedi_options]
+train = "/mnt/ceph_rbd/data/eedi_options/train_options.txt"
+test = "/mnt/ceph_rbd/data/eedi_options/test_options.txt"
+n_questions = 2578
+n_pid = 0
+inputs = ["q", "s"]
+
+[moocRadar]
+train = "moocRadar/train.txt"
+test = "moocRadar/test.txt"
+n_questions = 2513
+n_pid = 0
+inputs = ["q", "s"]
