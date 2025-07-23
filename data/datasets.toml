@@ -46,3 +46,10 @@ test = "moocRadar/test.txt"
 n_questions = 2513
 n_pid = 0
 inputs = ["q", "s"]
+
+[eedi_coldstart]
+train = "cold_start/train_coldstart.txt"
+test = "cold_start/test_coldstart.txt"
+n_questions = 2578
+n_pid = 0
+inputs = ["q", "s"]
