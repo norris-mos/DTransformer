@@ -303,6 +303,32 @@ def main(args):
             n_heads=args.n_heads,
             dropout=args.dropout,
         )
+    elif args.model == "AKT_text":
+        from baselines.AKT_text import AKT_text
+
+        model = AKT_text(
+            dataset["n_questions"],
+            dataset["n_pid"],
+            d_model=args.d_model,
+            n_heads=args.n_heads,
+            dropout=args.dropout,
+        )
+    elif args.model == "DTransformer_Options":
+        from baselines.DTransformer_Options import DTransformer_Options
+
+        model = DTransformer_Options(
+            dataset["n_questions"],
+            dataset["n_pid"],
+            d_model=args.d_model,
+            n_layers=args.n_layers,
+            n_heads=args.n_heads,
+            n_know=args.n_know,
+            lambda_cl=args.lambda_cl,
+            dropout=args.dropout,
+            proj=args.proj,
+            hard_neg=args.hard_neg,
+            window=args.window,
+        )
     else:
         from DTransformer.model import DTransformer
 
