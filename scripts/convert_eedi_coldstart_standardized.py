@@ -18,7 +18,6 @@ import os
 import argparse
 import json
 from tqdm import tqdm
-from transformers import AutoTokenizer
 
 
 class StandardizedEediColdStartToDTransformer:
@@ -26,18 +25,12 @@ class StandardizedEediColdStartToDTransformer:
     Create cold start datasets for DTransformer/DKT models using IDENTICAL filtering to LLM preprocessing.
     """
     
-    def __init__(self, random_seed: int = 42, min_sequence_length: int = 2, max_sequence_length: int = 200, 
-                 max_token_length: int = 12000, model_name: str = "unsloth/Llama-3.2-3B-Instruct"):
+    def __init__(self, random_seed: int = 42, min_sequence_length: int = 2, max_sequence_length: int = 200):
         self.random_seed = random_seed
-        self.min_sequence_length = min_sequence_length  # Match LLM: >=2
-        self.max_sequence_length = max_sequence_length  # Match LLM: <=200
-        self.max_token_length = max_token_length  # Match LLM: <=12000 tokens
+        self.min_sequence_length = min_sequence_length  # Min: >=2
+        self.max_sequence_length = max_sequence_length  # Max: <=200
         
-        # Load tokenizer for token-based filtering (SAME as LLM)
-        print(f"Loading tokenizer: {model_name}")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
+        # No tokenizer needed since we're not doing token-based filtering
         
         # Data storage
         self.answers = None
@@ -59,7 +52,7 @@ class StandardizedEediColdStartToDTransformer:
             cold_start_data = json.load(f)
         
         # Get test users from the JSON file
-        self.cold_start_users = set(cold_start_data['test_users'])
+        self.cold_start_users = set(cold_start_data['test_students'])
         
         print(f"Loaded {len(self.cold_start_users)} cold start test users")
         
@@ -202,24 +195,20 @@ class StandardizedEediColdStartToDTransformer:
     
     def _should_include_user_sequence(self, sorted_interactions: pd.DataFrame) -> bool:
         """
-        Apply SAME filtering logic as LLM preprocessing:
-        - Minimum 2 interactions (same as LLM: len(sorted_interactions) < 2)
-        - Maximum 200 interactions (same as LLM: len(sorted_interactions) > 200)
-        - Token-based length filtering (same as LLM: should_include_sequence())
+        Apply sequence length filtering (no token-based filtering):
+        - Minimum 2 interactions
+        - Maximum 200 interactions
         """
         seq_len = len(sorted_interactions)
         
-        # Basic length filtering
+        # Basic length filtering only
         if seq_len < self.min_sequence_length:
             return False
             
         if seq_len > self.max_sequence_length:
             return False
         
-        # Token-based filtering (CRITICAL: this was missing before!)
-        if not self._should_include_sequence_token_based(sorted_interactions):
-            return False
-            
+        # No token-based filtering for fair comparison
         return True
     
     def create_train_file(self, output_path: str) -> None:
@@ -231,7 +220,6 @@ class StandardizedEediColdStartToDTransformer:
         with open(train_file, 'w') as f:
             sequences_written = 0
             users_filtered_length = 0
-            users_filtered_tokens = 0
             
             for user_id in tqdm(self.train_users, desc="Processing train users"):
                 if user_id not in self.user_groups.groups:
@@ -241,14 +229,12 @@ class StandardizedEediColdStartToDTransformer:
                 
                 # Check basic length filtering first
                 seq_len = len(user_data)
+                # Check length filtering
                 if seq_len < self.min_sequence_length or seq_len > self.max_sequence_length:
                     users_filtered_length += 1
                     continue
                 
-                # Check token-based filtering
-                if not self._should_include_sequence_token_based(user_data):
-                    users_filtered_tokens += 1
-                    continue
+                # No token-based filtering for fair comparison
                     
                 problem_ids = user_data['QuestionId'].tolist()
                 responses = user_data['Response'].tolist()
@@ -262,20 +248,17 @@ class StandardizedEediColdStartToDTransformer:
                 
         print(f"Wrote {sequences_written} standardized training sequences")
         print(f"Filtered out {users_filtered_length} users (length criteria)")
-        print(f"Filtered out {users_filtered_tokens} users (token criteria - SAME as LLM)")
         
     def create_test_file(self, output_path: str) -> None:
-        """Create test.txt file in DTransformer format with SAME progressive filtering as LLM."""
+        """Create test.txt file in DTransformer format with simple length filtering only."""
         test_file = os.path.join(output_path, 'test_coldstart_standardized.txt')
         
         print(f"Creating standardized cold start test file: {test_file}")
-        print("IMPORTANT: Using PROGRESSIVE filtering - same as LLM (filters each prediction individually)")
+        print("Using simple length filtering (no progressive filtering needed)")
         
         with open(test_file, 'w') as f:
             sequences_written = 0
             users_filtered_length = 0
-            predictions_filtered_tokens = 0
-            total_predictions = 0
             
             for user_id in tqdm(self.test_users, desc="Processing test users"):
                 if user_id not in self.user_groups.groups:
@@ -283,44 +266,23 @@ class StandardizedEediColdStartToDTransformer:
                     
                 user_data = self.user_groups.get_group(user_id).sort_values('DateAnswered').reset_index(drop=True)
                 
-                # Basic length check (same as LLM)
+                # Simple length check
                 seq_len = len(user_data)
                 if seq_len < self.min_sequence_length or seq_len > self.max_sequence_length:
                     users_filtered_length += 1
                     continue
                 
-                # PROGRESSIVE FILTERING: Check each sub-sequence like LLM does
-                # LLM creates predictions: 1→2, 1→3, 1→4, ..., 1→n
-                # and filters each prediction individually
-                valid_predictions = []
+                # Write in DTransformer format
                 problem_ids = user_data['QuestionId'].tolist()
                 responses = user_data['Response'].tolist()
                 
-                for i in range(1, seq_len):  # For each prediction position
-                    # Create sub-sequence up to position i (like LLM progressive)
-                    sub_sequence = user_data.iloc[:i+1]  # Include target position
-                    
-                    # Apply token-based filtering to this sub-sequence
-                    if self._should_include_sequence_token_based(sub_sequence):
-                        valid_predictions.append(i)
-                    else:
-                        predictions_filtered_tokens += 1
-                    
-                    total_predictions += 1
-                
-                # Only include user if they have valid predictions  
-                if valid_predictions:
-                    # For DTransformer format, we still write the full sequence
-                    # but this ensures only sequences with valid progressive predictions
-                    f.write(f"{seq_len}\n")
-                    f.write(",".join(map(str, problem_ids)) + "\n")
-                    f.write(",".join(map(str, responses)) + "\n")
-                    sequences_written += 1
+                f.write(f"{seq_len}\n")
+                f.write(",".join(map(str, problem_ids)) + "\n")
+                f.write(",".join(map(str, responses)) + "\n")
+                sequences_written += 1
                 
         print(f"Wrote {sequences_written} standardized test sequences")
         print(f"Filtered out {users_filtered_length} users (length criteria)")
-        print(f"Filtered out {predictions_filtered_tokens}/{total_predictions} individual predictions (token criteria - SAME as LLM)")
-        print(f"PROGRESSIVE FILTERING APPLIED: Each prediction filtered individually like LLM")
         
     def save_metadata(self, output_path: str, cold_start_file: str) -> None:
         """Save metadata about the standardized cold start conversion."""
@@ -329,14 +291,12 @@ class StandardizedEediColdStartToDTransformer:
         with open(metadata_file, 'w') as f:
             f.write("STANDARDIZED EEDI Cold Start to DTransformer Conversion Metadata\\n")
             f.write("=" * 60 + "\\n\\n")
-            f.write("STANDARDIZATION: This uses IDENTICAL filtering to LLM preprocessing\\n")
+            f.write("STANDARDIZATION: Uses sequence length filtering only (no token filtering)\\n")
             f.write("=" * 60 + "\\n\\n")
             f.write(f"Cold start users file: {cold_start_file}\\n")
             f.write(f"Random seed: {self.random_seed}\\n")
-            f.write(f"Min sequence length: {self.min_sequence_length} (SAME as LLM)\n")
-            f.write(f"Max sequence length: {self.max_sequence_length} (SAME as LLM)\n")
-            f.write(f"Max token length: {self.max_token_length} (SAME as LLM)\n")
-            f.write(f"Tokenizer: {self.tokenizer.name_or_path} (SAME as LLM)\n\n")
+            f.write(f"Min sequence length: {self.min_sequence_length}\\n")
+            f.write(f"Max sequence length: {self.max_sequence_length}\\n\\n")
             
             f.write(f"Total unique questions: {self.num_questions}\\n")
             f.write(f"Train users (never answered cold start questions): {len(self.train_users)}\\n")
@@ -382,13 +342,9 @@ def main():
     parser.add_argument("--cold_start_users", type=str, required=True,
                        help="Path to JSON file containing cold start test users")
     parser.add_argument("--min_length", type=int, default=2,
-                       help="Minimum sequence length to include (default: 2, same as LLM)")
+                       help="Minimum sequence length to include (default: 2)")
     parser.add_argument("--max_length", type=int, default=200,
-                       help="Maximum sequence length to include (default: 200, same as LLM)")
-    parser.add_argument("--max_token_length", type=int, default=12000,
-                       help="Maximum token length to include (default: 12000, same as LLM)")
-    parser.add_argument("--model_name", type=str, default="unsloth/Llama-3.2-3B-Instruct",
-                       help="Model name for tokenizer (default: same as LLM training)")
+                       help="Maximum sequence length to include (default: 200)")
     parser.add_argument("--seed", type=int, default=42,
                        help="Random seed for reproducible processing (default: 42)")
     
@@ -397,13 +353,11 @@ def main():
     # Create output directory if it doesn't exist
     os.makedirs(args.output, exist_ok=True)
     
-    # Initialize converter with ALL LLM parameters
+    # Initialize converter with sequence length filtering only
     converter = StandardizedEediColdStartToDTransformer(
         random_seed=args.seed,
         min_sequence_length=args.min_length,
-        max_sequence_length=args.max_length,
-        max_token_length=args.max_token_length,
-        model_name=args.model_name
+        max_sequence_length=args.max_length
     )
     
     # Load cold start users first
@@ -425,8 +379,8 @@ def main():
     print("  - coldstart_standardized_metadata.txt")
     print("  - coldstart_standardized_train_users.json")
     print("  - coldstart_standardized_test_users.json")
-    print("\nThese files use IDENTICAL filtering criteria as the LLM preprocessing!")
-    print("Including both interaction count AND token-based filtering!")
+    print("\nThese files use sequence length filtering (2-200 interactions) only!")
+    print("No token-based filtering applied for fair comparison!")
 
 
 if __name__ == "__main__":
