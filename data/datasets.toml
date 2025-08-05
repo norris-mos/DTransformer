@@ -53,3 +53,17 @@ test = "cold_start/test_coldstart.txt"
 n_questions = 2578
 n_pid = 0
 inputs = ["q", "s"]
+
+[eedi_coldstart_standardized]
+train = "cold_start/train_coldstart_standardized.txt"
+test = "cold_start/test_coldstart_standardized.txt"
+n_questions = 2578
+n_pid = 0
+inputs = ["q", "s"]
+
+[eedi_coldstart_standardized]
+train = "cold_start/train_coldstart_standardized.txt"
+test = "cold_start/test_coldstart_standardized.txt"
+n_questions = 2578
+n_pid = 0
+inputs = ["q", "s"]
