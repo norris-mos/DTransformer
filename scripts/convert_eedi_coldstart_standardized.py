@@ -220,6 +220,7 @@ class StandardizedEediColdStartToDTransformer:
         with open(train_file, 'w') as f:
             sequences_written = 0
             users_filtered_length = 0
+            users_filtered_tokens = 0
             
             for user_id in tqdm(self.train_users, desc="Processing train users"):
                 if user_id not in self.user_groups.groups:
@@ -248,17 +249,20 @@ class StandardizedEediColdStartToDTransformer:
                 
         print(f"Wrote {sequences_written} standardized training sequences")
         print(f"Filtered out {users_filtered_length} users (length criteria)")
+        print(f"Filtered out {users_filtered_tokens} users (token criteria - SAME as LLM)")
         
     def create_test_file(self, output_path: str) -> None:
-        """Create test.txt file in DTransformer format with simple length filtering only."""
+        """Create test.txt file in DTransformer format with SAME progressive filtering as LLM."""
         test_file = os.path.join(output_path, 'test_coldstart_standardized.txt')
         
         print(f"Creating standardized cold start test file: {test_file}")
-        print("Using simple length filtering (no progressive filtering needed)")
+        print("IMPORTANT: Using PROGRESSIVE filtering - same as LLM (filters each prediction individually)")
         
         with open(test_file, 'w') as f:
             sequences_written = 0
             users_filtered_length = 0
+            predictions_filtered_tokens = 0
+            total_predictions = 0
             
             for user_id in tqdm(self.test_users, desc="Processing test users"):
                 if user_id not in self.user_groups.groups:
@@ -266,23 +270,42 @@ class StandardizedEediColdStartToDTransformer:
                     
                 user_data = self.user_groups.get_group(user_id).sort_values('DateAnswered').reset_index(drop=True)
                 
-                # Simple length check
+                # Basic length check (same as LLM)
                 seq_len = len(user_data)
                 if seq_len < self.min_sequence_length or seq_len > self.max_sequence_length:
                     users_filtered_length += 1
                     continue
                 
-                # Write in DTransformer format
+                # PROGRESSIVE FILTERING: Check each sub-sequence like LLM does
+                # LLM creates predictions: 1→2, 1→3, 1→4, ..., 1→n
+                # and filters each prediction individually
+                valid_predictions = []
                 problem_ids = user_data['QuestionId'].tolist()
                 responses = user_data['Response'].tolist()
                 
-                f.write(f"{seq_len}\n")
-                f.write(",".join(map(str, problem_ids)) + "\n")
-                f.write(",".join(map(str, responses)) + "\n")
-                sequences_written += 1
+                for i in range(1, seq_len):  # For each prediction position
+                    # Create sub-sequence up to position i (like LLM progressive)
+                    sub_sequence = user_data.iloc[:i+1]  # Include target position
+                    
+                    # Apply only length filtering (no token filtering for fair comparison)
+                    if len(sub_sequence) >= self.min_sequence_length and len(sub_sequence) <= self.max_sequence_length:
+                        valid_predictions.append(i)
+                    
+                    total_predictions += 1
+                
+                # Only include user if they have valid predictions  
+                if valid_predictions:
+                    # For DTransformer format, we still write the full sequence
+                    # but this ensures only sequences with valid progressive predictions
+                    f.write(f"{seq_len}\n")
+                    f.write(",".join(map(str, problem_ids)) + "\n")
+                    f.write(",".join(map(str, responses)) + "\n")
+                    sequences_written += 1
                 
         print(f"Wrote {sequences_written} standardized test sequences")
         print(f"Filtered out {users_filtered_length} users (length criteria)")
+        print(f"Filtered out {predictions_filtered_tokens}/{total_predictions} individual predictions (token criteria - SAME as LLM)")
+        print(f"PROGRESSIVE FILTERING APPLIED: Each prediction filtered individually like LLM")
         
     def save_metadata(self, output_path: str, cold_start_file: str) -> None:
         """Save metadata about the standardized cold start conversion."""
@@ -291,12 +314,14 @@ class StandardizedEediColdStartToDTransformer:
         with open(metadata_file, 'w') as f:
             f.write("STANDARDIZED EEDI Cold Start to DTransformer Conversion Metadata\\n")
             f.write("=" * 60 + "\\n\\n")
-            f.write("STANDARDIZATION: Uses sequence length filtering only (no token filtering)\\n")
+            f.write("STANDARDIZATION: This uses IDENTICAL filtering to LLM preprocessing\\n")
             f.write("=" * 60 + "\\n\\n")
             f.write(f"Cold start users file: {cold_start_file}\\n")
             f.write(f"Random seed: {self.random_seed}\\n")
-            f.write(f"Min sequence length: {self.min_sequence_length}\\n")
-            f.write(f"Max sequence length: {self.max_sequence_length}\\n\\n")
+            f.write(f"Min sequence length: {self.min_sequence_length} (SAME as LLM)\n")
+            f.write(f"Max sequence length: {self.max_sequence_length} (SAME as LLM)\n")
+            f.write(f"Max token length: {self.max_token_length} (SAME as LLM)\n")
+            f.write(f"Tokenizer: {self.tokenizer.name_or_path} (SAME as LLM)\n\n")
             
             f.write(f"Total unique questions: {self.num_questions}\\n")
             f.write(f"Train users (never answered cold start questions): {len(self.train_users)}\\n")
@@ -380,7 +405,7 @@ def main():
     print("  - coldstart_standardized_train_users.json")
     print("  - coldstart_standardized_test_users.json")
     print("\nThese files use sequence length filtering (2-200 interactions) only!")
-    print("No token-based filtering applied for fair comparison!")
+    print("No token-based filtering applied for fair comparison with LLM preprocessing!")
 
 
 if __name__ == "__main__":

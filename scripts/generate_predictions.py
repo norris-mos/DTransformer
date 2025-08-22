@@ -71,6 +71,15 @@ def load_model_and_config(model_path, args):
             n_heads=config['n_heads'],
             dropout=config['dropout'],
         )
+    elif config['model'] == "AKT_text":
+        from baselines.AKT_text import AKT_text
+        model = AKT_text(
+            dataset_config["n_questions"],
+            dataset_config.get("n_pid", 0),
+            d_model=config['d_model'],
+            n_heads=config['n_heads'],
+            dropout=config['dropout'],
+        )
     else:
         # Default to DTransformer
         from DTransformer.model import DTransformer
@@ -99,8 +108,8 @@ def load_model_and_config(model_path, args):
     
     return model, dataset_config, config
 
-def generate_predictions(model, test_data, device):
-    """Generate predictions for all test sequences."""
+def generate_predictions(model, test_data, device, n=1):
+    """Generate predictions for all test sequences with T+N look-ahead."""
     all_predictions = []
     all_ground_truth = []
     all_probs = []
@@ -135,14 +144,14 @@ def generate_predictions(model, test_data, device):
                 if pid_seq is not None:
                     pid_seq = pid_seq.to(device)
                 
-                # Use the predict method like in test.py
-                y, *_ = model.predict(q_seq, s_seq, pid_seq, n=1)
+                # Use the predict method with look-ahead like in test.py
+                y, *_ = model.predict(q_seq, s_seq, pid_seq, n=n)
                 
                 # Apply sigmoid to get probabilities (like in test.py)
                 y_probs = torch.sigmoid(y)
                 
                 # Get ground truth (shifted by n-1, like in test.py)
-                y_true = s_seq[:, 0:]  # For n=1, no shift needed in ground truth extraction
+                y_true = s_seq[:, (n - 1):]  # Shift ground truth to align with T+N predictions
                 
                 # Create mask for valid predictions (exclude padding)
                 mask = y_true >= 0
@@ -189,14 +198,15 @@ def parse_test_file_for_users(test_file_path):
     
     return user_sequences
 
-def create_predictions_dataframe(ground_truth, predictions, probs, user_sequences):
-    """Create a DataFrame with predictions aligned to users."""
+def create_predictions_dataframe(ground_truth, predictions, probs, user_sequences, n=1):
+    """Create a DataFrame with predictions aligned to users, accounting for T+N look-ahead."""
     
-    # Calculate how many predictions each user should have
+    # Calculate how many predictions each user should have with T+N look-ahead
     user_prediction_counts = []
     for seq in user_sequences:
-        # Each user has seq_len - 1 predictions (predicting response to each question except the first)
-        user_prediction_counts.append(seq['seq_len'] - 1)
+        # With T+N prediction, we have seq_len - n predictions (we lose n-1 more predictions due to look-ahead)
+        prediction_count = max(0, seq['seq_len'] - n)
+        user_prediction_counts.append(prediction_count)
     
     # Create user IDs for each prediction
     user_ids = []
@@ -253,6 +263,7 @@ def main():
     parser.add_argument("--hard_neg", action="store_true", help="use hard negative samples in CL")
     parser.add_argument("--window", type=int, default=1, help="prediction window")
     parser.add_argument("--max_seq_len", type=int, default=None, help="maximum sequence length")
+    parser.add_argument("-N", help="T+N prediction window size (look-ahead)", type=int, default=1)
     
     args = parser.parse_args()
     
@@ -279,15 +290,15 @@ def main():
     print(f"Loaded {len(test_data)} test sequences")
     
     # Generate predictions
-    print("Generating predictions...")
-    ground_truth, predictions, probs = generate_predictions(model, test_data, args.device)
+    print(f"Generating predictions with T+{args.N} look-ahead...")
+    ground_truth, predictions, probs = generate_predictions(model, test_data, args.device, n=args.N)
     
     # Parse test file to get user information
     test_file_path = os.path.join(DATA_DIR, dataset_config["test"])
     user_sequences = parse_test_file_for_users(test_file_path)
     
     # Create predictions DataFrame
-    predictions_df = create_predictions_dataframe(ground_truth, predictions, probs, user_sequences)
+    predictions_df = create_predictions_dataframe(ground_truth, predictions, probs, user_sequences, n=args.N)
     
     # Save predictions
     os.makedirs(os.path.dirname(args.output_file), exist_ok=True)

@@ -1,5 +1,6 @@
 import os
 import sys
+print("[DEBUG] train.py script started")
 import json
 from argparse import ArgumentParser
 
@@ -171,10 +172,11 @@ def write_sequences_to_file(sequences, filepath):
 
 # training logic
 def main(args):
+    print("[DEBUG] Entered main()")
     # prepare dataset
     dataset = datasets[args.dataset]
     seq_len = dataset["seq_len"] if "seq_len" in dataset else None
-    
+    print(f"[DEBUG] Dataset loaded: {args.dataset}, seq_len: {seq_len}")
     # Analyze sequence lengths if requested
     if args.analyze_data:
         print("Analyzing training data...")
@@ -182,46 +184,36 @@ def main(args):
         print("\nAnalyzing test data...")
         analyze_sequence_lengths(os.path.join(DATA_DIR, dataset["test"]))
         print()
-    
     # Override seq_len if max_seq_len is specified
     if args.max_seq_len is not None:
         seq_len = args.max_seq_len
         print(f"Limiting sequences to max length: {seq_len}")
-    
     # Determine training and validation data files
     if "valid" in dataset:
-        # Use existing validation split
         print("Using existing validation split from dataset configuration")
         train_file = os.path.join(DATA_DIR, dataset["train"])
         valid_file = os.path.join(DATA_DIR, dataset["valid"])
     elif args.use_test_as_val:
-        # Use test as validation (current behavior - with warning)
         print("WARNING: Using test data as validation. This may lead to data leakage!")
         print("Consider using --val_ratio to create a proper validation split from training data.")
         train_file = os.path.join(DATA_DIR, dataset["train"])
         valid_file = os.path.join(DATA_DIR, dataset["test"])
     else:
-        # Create validation split from training data
         print(f"Creating {args.val_ratio:.1%} validation split from training data...")
         train_sequences, val_sequences = create_validation_split(
             os.path.join(DATA_DIR, dataset["train"]), 
             val_ratio=args.val_ratio,
             seed=args.seed
         )
-        
-        # Create temporary files (use output directory if available)
         temp_dir = args.output_dir if args.output_dir else DATA_DIR
         os.makedirs(temp_dir, exist_ok=True)
-        
         train_file = os.path.join(temp_dir, f"temp_train_{args.dataset}.txt")
         valid_file = os.path.join(temp_dir, f"temp_val_{args.dataset}.txt")
-        
         write_sequences_to_file(train_sequences, train_file)
         write_sequences_to_file(val_sequences, valid_file)
-        
         print(f"Created temporary training file: {train_file}")
         print(f"Created temporary validation file: {valid_file}")
-    
+    print(f"[DEBUG] Instantiating KTData for train_file: {train_file}")
     train_data = KTData(
         train_file,
         dataset["inputs"],
@@ -229,13 +221,14 @@ def main(args):
         batch_size=args.batch_size,
         shuffle=True,
     )
+    print(f"[DEBUG] Instantiating KTData for valid_file: {valid_file}")
     valid_data = KTData(
         valid_file,
         dataset["inputs"],
         seq_len=seq_len,
         batch_size=args.test_batch_size,
     )
-
+    print("[DEBUG] Finished KTData instantiation. Preparing logger and output directory...")
     # prepare logger and output directory
     if args.output_dir:
         os.makedirs(args.output_dir, exist_ok=True)
@@ -365,7 +358,9 @@ def main(args):
     for epoch in range(1, args.n_epochs + 1):
         print("start epoch", epoch)
         model.train()
+        print("[DEBUG] Creating train_data iterator...")
         it = tqdm(iter(train_data))
+        print("[DEBUG] Entered training loop.")
         total_loss = 0.0
         total_pred_loss = 0.0
         total_cl_loss = 0.0
@@ -530,8 +525,9 @@ def main(args):
 
 
 if __name__ == "__main__":
+    print("[DEBUG] __main__ block entered")
     args = parser.parse_args()
-    print(args)
+    print(f"[DEBUG] Args parsed: {args}")
     best_epoch, best = main(args)
     print(args)
     print("best epoch:", best_epoch)
